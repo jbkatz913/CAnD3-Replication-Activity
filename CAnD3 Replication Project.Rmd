@@ -1,0 +1,168 @@
+---
+title: "CAnD3 Replication Project"
+author: "Jordan Katz"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, warning=FALSE, echo=FALSE}
+
+# install and load packages
+
+# the packages for this code file can be installed using the code in lines 13-18
+
+#install.packages("tidyverse")
+#install.packages("modelsummary")
+#install.packages("kableExtra")
+#install.packages("gt")
+#install.packages("broom")
+#install.packages("MASS")
+
+library(knitr)
+library(tidyverse)
+library(modelsummary)
+library(kableExtra)
+library(gt)
+library(broom)
+library(MASS)
+
+```
+
+
+
+```{r, include=FALSE, warning=FALSE, echo=FALSE}
+
+# load data
+
+# replace the file path in the setwd() function with your working directory. 
+
+# set working directory
+setwd("/Users/jkatz1/Documents/McGill/CAnD3/Replication Assignment")
+
+# to import data, unzip the folder "GSS 2017 - Family, Cycle 31"
+gss <- read.csv("./Replication Materials/GSS 2017 - Family, Cycle 31/gss-12M0025-E-2017-c-31_F1.csv")
+
+
+```
+
+
+### Data cleaning for analysis
+
+- We recode the mental health variable (SRH_115) for easier interpretation. Lower values correspond to lower self-rated mental health. Higher values correspond to higher self-rated mental health.  
+
+- We also recode each of the following independent variables to binary variables: SEX, MARSTAT, and BRTHCAN. These variables are now coded as flags for *female*, *married*, and *migrant*. In addition, we include a continuous variable for *age*. 
+
+- All respondent skips and "don't know" responses are coded as NA and excluded from the analysis.  
+
+```{r, include=FALSE, warning=FALSE, echo=FALSE}
+
+gss_recode <- gss %>% 
+  # select variables for analysis
+  dplyr::select(SRH_115, BRTHCAN, MARSTAT, AGEC, SEX) %>%
+  mutate(
+    # recode SRH_115 variable for more intuitive interpretation 
+    mental.health = case_when(
+      SRH_115 == 1 ~ 5,
+      SRH_115 == 2 ~ 4, 
+      SRH_115 == 3 ~ 3,
+      SRH_115 == 4 ~ 2, 
+      SRH_115 == 5 ~ 1, 
+      TRUE ~ NA),
+    # create binary marital status variale
+    married = case_when(
+      MARSTAT == 1 ~ 1, 
+      MARSTAT >= 2 & MARSTAT <= 6 ~ 0,
+      TRUE ~ NA), 
+    # recode SEX variable to make binary female variable
+    female = case_when(
+      SEX == 1 ~ 0,
+      SEX == 2 ~ 1, 
+      TRUE ~ NA),
+    # drop people who did not respond to age question
+    age = if_else(AGEC >= 96, NA, AGEC),
+    # recode BRTHCAN variable to make binary migrant flag
+    migrant = case_when(
+      BRTHCAN == 1 ~ 0, 
+      BRTHCAN == 2 ~ 1, 
+      TRUE ~ NA)
+    ) 
+
+```
+
+### Descriptive statistics
+
+- Here, we include summary statistics (mean, standard deviation, and respondent count) of the variables used in the below models. 
+
+```{r, warning=FALSE, echo=FALSE}
+
+# calculate mean, standard deviation, and count
+descriptives <- gss_recode %>%
+  summarise(across(c(mental.health:migrant), list(
+    mean = ~mean(.x, na.rm = TRUE),
+    sd = ~sd(.x, na.rm = TRUE),
+    n = ~sum(!is.na(.))
+  ), .names = "{col}_{fn}"))
+
+# reshape summary statistics
+descriptives_long <- descriptives %>%
+  pivot_longer(cols = everything(), names_to = c("variable", ".value"), names_sep = "_") 
+ 
+# convert descriptives to table
+descriptives_long %>%
+  kable("html", digits = 2, caption = "Descriptive Statistics",
+        col.names = c("Variable", "Mean", "Stan Dev", "N")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    font_size = 12,
+    position = "center",
+    full_width = FALSE)
+
+```
+
+
+### Ordinal logistic regression models 
+
+- We run two models---a basic model and a full model. The basic model (model 1) regresses self-rated mental health on the indicator variable for respondents not born in Canada (first generation migrants). The full model (model 2) introduces the other independent variables: *female*, *married*, *migrant*, and *age*. 
+
+```{r, warning=FALSE, echo=FALSE, results='asis'}
+
+# basic model that just looks at migrant variable 
+model_basic <- polr(as.factor(mental.health) ~ migrant, data = gss_recode, Hess = TRUE)
+
+# summary(model_basic)
+
+# basic model that just looks at migrant variable 
+model_full <- polr(as.factor(mental.health) ~ migrant + married + female + age,
+                   data = gss_recode, Hess = TRUE)
+
+# summary(model_full)
+
+# combine the models into a list for results table 
+models <- list(
+  "Model 1" = model_basic,
+  "Model 2" = model_full)
+
+# create a summary table
+model_summary <- modelsummary(models, stars = TRUE, output = "kableExtra",
+                              coef_map = c("migrant", "married", "female", "age", 
+                                           "1|2", "2|3", "3|4", "4|5"), 
+                              coef_omit = "^$") # ensures order of coefficients
+
+# Print the table with kableExtra styling
+model_summary %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    font_size = 12,
+    position = "center") 
+
+```
+
+
+### Results
+
+- The analysis suggests that being married and having been born outside of Canada are correlated with higher levels of self-rated mental health. 
+
+- In contrast, we see that females and aging are associated with lower levels of self-reported mental health. 
+
+
